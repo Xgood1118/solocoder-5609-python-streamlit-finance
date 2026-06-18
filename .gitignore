@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data (sample/test data)
+data/*.csv
+data/*.xlsx
+/data/uploads/
+
+# Eval artifacts
+screenshot_*.png
+*_check.html
+*_debug.html
+edge_*.md
+empty.md
+img_test.md
+test_*.js
+test_*.py
+/tmp_*.log
+/tmp_*.txt

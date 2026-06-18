@@ -1,0 +1,1 @@
+有几个问题：1. 异常检测 detect_anomalies 直接抛 ValueError，pandas 2.x 不再支持 'm' 频率。2. 导出 PDF 没实现——只生成 HTML 让你打印，PROMPT 要 weasyprint/wkhtmltopdf，requirements 里也没。3. 多表 Join 没 UI：build_joined_data 永远传空 dict 走 concat fallback，列名重复损坏数据。4. 钻取交互 app.py 没接：drill_state.add_state 从未被调用，点图表下钻走不通。5. 图表注释面板 show_annotation_panel 初始化后再也没用，注释永远保存不到报告里。检查修复一下。
