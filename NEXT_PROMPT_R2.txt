@@ -1,0 +1,1 @@
+PDF 导出还是用不了——weasyprint 在 Windows 缺 GTK 系统库（libgobject-2.0-0、libpango 等），import 直接挂，is_pdf_available() 一直返 False，PROMPT 要求的「导出 PDF」对用户不可达。换不依赖 GTK 的方案重做：reportlab 直接拼版式 / xhtml2pdf / pdfkit+wkhtmltopdf，二选一都行，但 ensure 在 Windows + Linux 都能正常 install + import + 生成 PDF（端到端跑一遍），报告页给个「下载 PDF」按钮真的能下载出 PDF 文件。
