@@ -21,7 +21,8 @@ from core.charts import (
 )
 from core.annotations import AnnotationManager
 from core.report import (
-    export_to_excel, generate_html_report, export_raw_data
+    export_to_excel, generate_html_report, export_raw_data,
+    generate_pdf_report, is_pdf_available
 )
 
 st.set_page_config(
@@ -102,6 +103,13 @@ def init_session_state():
         st.session_state.selected_date_point = None
     if 'show_annotation_panel' not in st.session_state:
         st.session_state.show_annotation_panel = None
+    if 'join_config' not in st.session_state:
+        st.session_state.join_config = {
+            'join_type': 'left',
+            'join_keys': {},
+        }
+    if 'chart_figures' not in st.session_state:
+        st.session_state.chart_figures = {}
 
 
 def load_sample_data():
@@ -150,6 +158,7 @@ def get_filtered_data():
         return df
 
     df[date_col] = pd.to_datetime(df[date_col])
+    df = add_time_periods(df, date_col)
 
     category_filters = {}
     dept_col = cfg.get('dept_col', '')
@@ -372,10 +381,83 @@ def render_charts():
     cost_col = cfg.get('cost_col', 'cost')
     product_col = cfg.get('product_col', 'product')
     dept_col = cfg.get('dept_col', 'department')
+    region_col = cfg.get('region_col', 'region')
 
     period = st.session_state.get('time_granularity', '月')
     period_map = {'日': 'day', '周': 'week', '月': 'month', '季': 'quarter', '年': 'year'}
     period_key = period_map.get(period, 'month')
+
+    drill = st.session_state.drill_state
+    figures = st.session_state.chart_figures
+    figures.clear()
+
+    def _on_trend_click(selection):
+        if not selection or not selection.points:
+            return
+        point = selection.points[0]
+        period_val = point.get('x')
+        if period_val and product_col and product_col in df.columns:
+            drill.add_state(
+                level='product',
+                filters={period_key: [str(period_val)]},
+                title=f"{period_val} · 产品维度"
+            )
+            st.rerun()
+
+    def _on_dept_click(selection):
+        if not selection or not selection.points:
+            return
+        point = selection.points[0]
+        dept_val = point.get('y') if point.get('orientation') == 'h' else point.get('x')
+        if not dept_val:
+            dept_val = point.get('label', '')
+        if dept_val and dept_col and dept_col in df.columns:
+            drill.add_state(
+                level='product_by_dept',
+                filters={dept_col: [dept_val]},
+                title=f"{dept_val} · 产品明细"
+            )
+            st.rerun()
+
+    def _on_product_pie_click(selection):
+        if not selection or not selection.points:
+            return
+        point = selection.points[0]
+        prod_val = point.get('label', '')
+        if prod_val and product_col and product_col in df.columns:
+            drill.add_state(
+                level='region_by_product',
+                filters={product_col: [prod_val]},
+                title=f"{prod_val} · 地区分布"
+            )
+            st.rerun()
+
+    def _render_annotation_panel(chart_id, chart_title=""):
+        ann_mgr = st.session_state.annotation_manager
+        with st.expander(f"📝 图表注释 ({len(ann_mgr.get_annotations(chart_id))}条)", expanded=False):
+            anns = ann_mgr.get_annotations(chart_id)
+            if anns:
+                for i, ann in enumerate(anns):
+                    st.markdown(f"**{ann.get('author', '匿名')}** · {ann.get('created_at', '')[:16]}")
+                    st.write(ann['content'])
+                    col_del, _ = st.columns([1, 5])
+                    with col_del:
+                        if st.button("删除", key=f"del_{chart_id}_{i}", type="secondary"):
+                            ann_mgr.delete_annotation(chart_id, ann['id'])
+                            st.rerun()
+                    st.divider()
+            else:
+                st.caption("暂无注释")
+
+            with st.form(key=f"add_ann_form_{chart_id}", clear_on_submit=True):
+                new_content = st.text_area("添加注释", height=80, key=f"new_ann_{chart_id}")
+                col_sub, _ = st.columns([1, 3])
+                with col_sub:
+                    submitted = st.form_submit_button("保存注释", type="primary")
+                if submitted and new_content.strip():
+                    ann_mgr.add_annotation(chart_id, new_content.strip())
+                    st.success("注释已保存")
+                    st.rerun()
 
     st.markdown('<p class="section-title">📈 营收趋势</p>', unsafe_allow_html=True)
 
@@ -389,7 +471,11 @@ def render_charts():
             yoy_col=f'{revenue_col}_yoy' if f'{revenue_col}_yoy' in trend_df.columns else None,
             title="营收月度趋势"
         )
-        st.plotly_chart(fig_trend, use_container_width=True, key="revenue_trend")
+        figures['营收趋势'] = fig_trend
+        st.plotly_chart(fig_trend, use_container_width=True, key="revenue_trend",
+                        selection_mode="points", on_select=_on_trend_click)
+        st.caption("💡 点击趋势图上的数据点可下钻到产品维度")
+        _render_annotation_panel("revenue_trend", "营收趋势")
 
     col1, col2 = st.columns(2)
 
@@ -404,7 +490,9 @@ def render_charts():
                     cost_by_product, product_col, [cost_col, profit_col],
                     title="产品成本与利润结构"
                 )
+                figures['成本结构'] = fig_cost
                 st.plotly_chart(fig_cost, use_container_width=True, key="cost_structure")
+                _render_annotation_panel("cost_structure", "成本结构")
 
     with col2:
         st.markdown('<p class="section-title">💧 利润瀑布</p>', unsafe_allow_html=True)
@@ -415,7 +503,9 @@ def render_charts():
                     profit_by_dept, dept_col, profit_col,
                     title="各部门利润构成"
                 )
+                figures['利润瀑布'] = fig_waterfall
                 st.plotly_chart(fig_waterfall, use_container_width=True, key="profit_waterfall")
+                _render_annotation_panel("profit_waterfall", "利润瀑布")
 
     col3, col4 = st.columns(2)
 
@@ -428,7 +518,11 @@ def render_charts():
                     top_dept, dept_col, revenue_col,
                     title="部门营收排名", horizontal=True, color='#2E86DE'
                 )
-                st.plotly_chart(fig_dept, use_container_width=True, key="dept_ranking")
+                figures['部门排名'] = fig_dept
+                st.plotly_chart(fig_dept, use_container_width=True, key="dept_ranking",
+                                selection_mode="points", on_select=_on_dept_click)
+                st.caption("💡 点击条形图可下钻到产品明细")
+                _render_annotation_panel("dept_ranking", "部门排名")
 
     with col4:
         st.markdown('<p class="section-title">📦 产品营收占比</p>', unsafe_allow_html=True)
@@ -439,7 +533,11 @@ def render_charts():
                     prod_revenue, product_col, revenue_col,
                     title="产品营收占比"
                 )
-                st.plotly_chart(fig_pie, use_container_width=True, key="product_pie")
+                figures['产品占比'] = fig_pie
+                st.plotly_chart(fig_pie, use_container_width=True, key="product_pie",
+                                selection_mode="points", on_select=_on_product_pie_click)
+                st.caption("💡 点击扇区可下钻到地区分布")
+                _render_annotation_panel("product_pie", "产品占比")
 
     st.markdown('<p class="section-title">🌊 现金流瀑布图</p>', unsafe_allow_html=True)
     total_revenue = df[revenue_col].sum() if revenue_col in df.columns else 0
@@ -452,7 +550,9 @@ def render_charts():
         total_revenue * 0.1, inflows, outflows,
         title="现金流瀑布图"
     )
+    figures['现金流'] = fig_cf
     st.plotly_chart(fig_cf, use_container_width=True, key="cashflow_waterfall")
+    _render_annotation_panel("cashflow_waterfall", "现金流瀑布")
 
 
 def render_sidebar():
@@ -509,8 +609,61 @@ def render_sidebar():
 
                 if st.button("应用映射", key="apply_mapping"):
                     ds.update_column_mapping(selected_table, biz_mapping)
-                    ds.build_joined_data({})
+                    join_cfg = st.session_state.join_config
+                    ds.build_joined_data(join_cfg['join_keys'], join_cfg['join_type'])
                     st.success("列名映射已应用")
+
+        st.divider()
+
+        st.subheader("🔗 多表关联 (Join)")
+        ds = st.session_state.data_source
+        table_names = list(ds.tables.keys())
+
+        if len(table_names) >= 2:
+            join_cfg = st.session_state.join_config
+
+            join_type = st.selectbox(
+                "关联方式",
+                ['left', 'inner', 'outer', 'right'],
+                index=['left', 'inner', 'outer', 'right'].index(join_cfg.get('join_type', 'left')),
+                key='join_type_select'
+            )
+            join_cfg['join_type'] = join_type
+
+            st.caption("主表（左表）: " + table_names[0])
+
+            for i in range(1, len(table_names)):
+                right_table = table_names[i]
+                st.markdown(f"**关联表 {i}: {right_table}**")
+
+                left_cols = ds.get_business_columns(table_names[0])
+                right_cols = ds.get_business_columns(right_table)
+
+                left_key_default = join_cfg['join_keys'].get(f'{right_table}_left', '')
+                right_key_default = join_cfg['join_keys'].get(f'{right_table}_right', '')
+
+                left_key = st.selectbox(
+                    "左表关联键",
+                    [''] + left_cols,
+                    index=(left_cols.index(left_key_default) + 1) if left_key_default in left_cols else 0,
+                    key=f'join_left_{right_table}'
+                )
+                right_key = st.selectbox(
+                    "右表关联键",
+                    [''] + right_cols,
+                    index=(right_cols.index(right_key_default) + 1) if right_key_default in right_cols else 0,
+                    key=f'join_right_{right_table}'
+                )
+
+                join_cfg['join_keys'][f'{right_table}_left'] = left_key
+                join_cfg['join_keys'][f'{right_table}_right'] = right_key
+
+            if st.button("执行关联", key="apply_join", use_container_width=True):
+                join_cfg = st.session_state.join_config
+                ds.build_joined_data(join_cfg['join_keys'], join_cfg['join_type'])
+                st.success(f"已关联 {len(table_names)} 张表，共 {len(ds.joined_data)} 行数据")
+        else:
+            st.info("上传 2 张及以上表格后可配置关联")
 
         st.divider()
 
@@ -605,7 +758,11 @@ def render_sidebar():
             cost_col = cfg.get('cost_col', 'cost')
             kpis = calculate_kpis(df, revenue_col, profit_col, cost_col, date_col, 'month')
 
+            ann_mgr = st.session_state.annotation_manager
+            annotations = ann_mgr.get_all_annotations()
+
             charts_html = {}
+            charts_fig = {}
             period = st.session_state.get('time_granularity', '月')
             period_map = {'日': 'day', '周': 'week', '月': 'month', '季': 'quarter', '年': 'year'}
             period_key = period_map.get(period, 'month')
@@ -614,8 +771,9 @@ def render_sidebar():
             if not trend_df.empty:
                 fig = create_revenue_trend_chart(trend_df, period_key, revenue_col)
                 charts_html['营收趋势'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
+                charts_fig['营收趋势'] = fig
 
-            html_report = generate_html_report(kpis, charts_html, title="财务数据分析报告")
+            html_report = generate_html_report(kpis, charts_html, annotations, title="财务数据分析报告")
             st.download_button(
                 "📄 导出 HTML 报告",
                 data=html_report,
@@ -623,7 +781,19 @@ def render_sidebar():
                 mime="text/html",
                 use_container_width=True
             )
-            st.caption("提示：打开 HTML 后可用浏览器打印为 PDF")
+
+            if is_pdf_available():
+                pdf_bytes = generate_pdf_report(kpis, charts_fig, annotations, title="财务数据分析报告")
+                if pdf_bytes:
+                    st.download_button(
+                        "📕 导出 PDF 报告",
+                        data=pdf_bytes,
+                        file_name=f"财务报告_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+            else:
+                st.caption("⚠️ PDF 导出依赖未安装（weasyprint/kaleido），可用 HTML 报告浏览器打印")
         else:
             st.info("暂无数据可导出")
 

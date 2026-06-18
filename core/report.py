@@ -1,7 +1,40 @@
 import io
+import base64
 import pandas as pd
 from typing import Dict, List, Optional
 import json
+
+try:
+    import plotly.io as pio
+    _KALEIDO_AVAILABLE = True
+except Exception:
+    _KALEIDO_AVAILABLE = False
+
+try:
+    from weasyprint import HTML
+    _WEASYPRINT_AVAILABLE = True
+except Exception:
+    _WEASYPRINT_AVAILABLE = False
+
+
+def fig_to_svg_base64(fig) -> Optional[str]:
+    if not _KALEIDO_AVAILABLE:
+        return None
+    try:
+        svg_bytes = pio.to_image(fig, format='svg', width=900, height=500)
+        return base64.b64encode(svg_bytes).decode('utf-8')
+    except Exception:
+        return None
+
+
+def fig_to_png_base64(fig) -> Optional[str]:
+    if not _KALEIDO_AVAILABLE:
+        return None
+    try:
+        png_bytes = pio.to_image(fig, format='png', width=900, height=500, scale=2)
+        return base64.b64encode(png_bytes).decode('utf-8')
+    except Exception:
+        return None
 
 
 def export_to_excel(dataframes: Dict[str, pd.DataFrame],
@@ -245,3 +278,36 @@ def replace_template(template_text: str, data: Dict) -> str:
 
 def export_raw_data(df: pd.DataFrame, filename: str = "raw_data.xlsx") -> bytes:
     return export_to_excel({"原始数据": df}, [filename.replace('.xlsx', '')])
+
+
+def generate_pdf_report(kpis: Dict, charts: Dict[str, object],
+                        annotations: Dict = None,
+                        title: str = "财务数据分析报告") -> bytes:
+    if not _WEASYPRINT_AVAILABLE:
+        raise ImportError("weasyprint 未安装，请先执行 pip install weasyprint")
+
+    chart_images = {}
+    for chart_id, fig in charts.items():
+        img_b64 = fig_to_png_base64(fig)
+        if img_b64:
+            chart_images[chart_id] = f'<img src="data:image/png;base64,{img_b64}" style="width:100%;max-width:800px;">'
+        else:
+            chart_images[chart_id] = f'<div style="padding:40px;text-align:center;color:#999;border:1px dashed #ddd;">[图表：{chart_id}]</div>'
+
+    html_content = generate_html_report(kpis, chart_images, annotations, title)
+
+    buf = io.BytesIO()
+    HTML(string=html_content).write_pdf(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+def is_pdf_available() -> bool:
+    return _WEASYPRINT_AVAILABLE and _KALEIDO_AVAILABLE
+
+
+def get_pdf_dependencies_status() -> Dict[str, bool]:
+    return {
+        'weasyprint': _WEASYPRINT_AVAILABLE,
+        'kaleido': _KALEIDO_AVAILABLE,
+    }

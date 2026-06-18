@@ -155,7 +155,9 @@ def detect_anomalies(df: pd.DataFrame, value_col: str, date_col: str,
     if value_col not in df.columns or date_col not in df.columns:
         return pd.DataFrame()
 
-    agg = df.groupby(df[date_col].dt.to_period(period[0]))[value_col].sum().reset_index()
+    freq_map = {'day': 'D', 'week': 'W', 'month': 'M', 'quarter': 'Q', 'year': 'Y'}
+    freq = freq_map.get(period, 'M')
+    agg = df.groupby(df[date_col].dt.to_period(freq))[value_col].sum().reset_index()
     agg.columns = [date_col, value_col]
     agg['prev_value'] = agg[value_col].shift(1)
     agg['change_rate'] = (agg[value_col] - agg['prev_value']) / agg['prev_value'].abs()

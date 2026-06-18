@@ -47,9 +47,18 @@ def join_tables(tables: Dict[str, pd.DataFrame],
         left_key = join_keys.get(name + '_left', '')
         right_key = join_keys.get(name + '_right', '')
         if left_key and right_key and left_key in result.columns and right_key in tables[name].columns:
-            result = result.merge(tables[name], left_on=left_key, right_on=right_key, how=join_type, suffixes=('', f'_{name}'))
+            right_df = tables[name].copy()
+            if right_key != left_key and left_key in right_df.columns:
+                right_df = right_df.drop(columns=[left_key])
+            result = result.merge(
+                right_df,
+                left_on=left_key,
+                right_on=right_key,
+                how=join_type,
+                suffixes=('', f'_{name}')
+            )
         else:
-            result = pd.concat([result, tables[name]], axis=1)
+            continue
 
     return result
 
